@@ -21,6 +21,10 @@ if ! git apply --reverse --check ../../patches/mpv_android_fdsan_fork.patch 2>/d
 	git apply ../../patches/mpv_android_fdsan_fork.patch
 fi
 
+if ! git apply --reverse --check ../../patches/mpv_android_display_p3.patch 2>/dev/null; then
+	git apply ../../patches/mpv_android_display_p3.patch
+fi
+
 # Android provides Vulkan, but no pkgconfig file.
 mkdir -p "$prefix_dir"/lib/pkgconfig
 cat >"$prefix_dir"/lib/pkgconfig/vulkan.pc <<END
