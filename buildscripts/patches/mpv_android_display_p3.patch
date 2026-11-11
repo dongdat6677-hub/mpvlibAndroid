@@ -1,0 +1,108 @@
+diff --git a/video/out/opengl/context_android.c b/video/out/opengl/context_android.c
+index 0a12cf8..cf0ef17 100644
+--- a/video/out/opengl/context_android.c
++++ b/video/out/opengl/context_android.c
+@@ -17,9 +17,13 @@
+ 
+ #include <EGL/egl.h>
+ #include <EGL/eglext.h>
++#include <android/api-level.h>
++#include <android/data_space.h>
++#include <android/native_window.h>
+ 
+ #include "video/out/android_common.h"
+ #include "egl_helpers.h"
++#include "utils.h"
+ #include "common/common.h"
+ #include "context.h"
+ 
+@@ -74,14 +78,51 @@ static bool android_init(struct ra_ctx *ctx)
+     eglGetConfigAttrib(p->egl_display, config, EGL_NATIVE_VISUAL_ID, &format);
+     ANativeWindow_setBuffersGeometry(native_window, 0, 0, format);
+ 
++    // Request a Display-P3 EGL surface when both the driver and the running
++    // OS version can honour it. Without this, mpv's target-prim=display-p3
++    // output is handed to SurfaceFlinger mistagged as sRGB, which crushes
++    // and discolors the wider-gamut values instead of displaying them.
++    const char *egl_exts = eglQueryString(p->egl_display, EGL_EXTENSIONS);
++    bool has_p3_colorspace = gl_check_extension(egl_exts, "EGL_EXT_gl_colorspace_display_p3");
++
++    EGLint p3_attribs[] = {
++        EGL_GL_COLORSPACE_KHR, EGL_GL_COLORSPACE_DISPLAY_P3_EXT,
++        EGL_NONE,
++    };
++
+     p->egl_surface = eglCreateWindowSurface(p->egl_display, config,
+-                                    (EGLNativeWindowType)native_window, NULL);
++                                    (EGLNativeWindowType)native_window,
++                                    has_p3_colorspace ? p3_attribs : NULL);
++
++    if (p->egl_surface == EGL_NO_SURFACE && has_p3_colorspace) {
++        // Some drivers advertise the extension but still reject the
++        // attribute on this particular config; fall back to the plain
++        // (sRGB-tagged) surface rather than failing playback outright.
++        MP_WARN(ctx, "Display-P3 EGL surface rejected, falling back to sRGB\n");
++        has_p3_colorspace = false;
++        p->egl_surface = eglCreateWindowSurface(p->egl_display, config,
++                                        (EGLNativeWindowType)native_window, NULL);
++    }
+ 
+     if (p->egl_surface == EGL_NO_SURFACE) {
+         MP_FATAL(ctx, "Could not create EGL surface!\n");
+         goto fail;
+     }
+ 
++    // The EGL colorspace attribute only affects how *this* process's GL
++    // context treats the buffer; SurfaceFlinger itself still needs the
++    // ANativeWindow's dataspace set explicitly or it composites the P3
++    // buffer as if it were sRGB. The setter is API 28+; older devices keep
++    // the sRGB-tagged path above.
++    if (has_p3_colorspace && android_get_device_api_level() >= 28) {
++        int32_t ds_result = ANativeWindow_setBuffersDataSpace(native_window,
++                                                               ADATASPACE_DISPLAY_P3);
++        if (ds_result < 0) {
++            MP_WARN(ctx, "Failed to tag ANativeWindow as Display-P3 (%d)\n",
++                    (int)ds_result);
++        }
++    }
++
+     if (!eglMakeCurrent(p->egl_display, p->egl_surface, p->egl_surface,
+                         p->egl_context)) {
+         MP_FATAL(ctx, "Failed to set context!\n");
+diff --git a/video/out/vulkan/context_android.c b/video/out/vulkan/context_android.c
+index 512830d..04a893d 100644
+--- a/video/out/vulkan/context_android.c
++++ b/video/out/vulkan/context_android.c
+@@ -27,6 +27,21 @@ struct priv {
+     struct mpvk_ctx vk;
+ };
+ 
++// Android has no API (unlike DXGI on Windows or the Wayland color-management
++// protocol) to ask the compositor what colorspace the panel actually wants,
++// so this just declares the same Display-P3/sRGB-transfer target that the
++// EGL/Android context sets explicitly via ANativeWindow_setBuffersDataSpace.
++// Without this hint, pl_swapchain_colorspace_hint() is never called here and
++// vo_gpu_next falls back to assuming BT.709/sRGB for the swapchain, which is
++// wrong on this build's Display-P3 wide-gamut AMOLED panels.
++static struct pl_color_space preferred_csp(struct ra_ctx *ctx)
++{
++    return (struct pl_color_space){
++        .primaries = PL_COLOR_PRIM_DISPLAY_P3,
++        .transfer = PL_COLOR_TRC_SRGB,
++    };
++}
++
+ static void android_uninit(struct ra_ctx *ctx)
+ {
+     struct priv *p = ctx->priv;
+@@ -53,7 +68,9 @@ static bool android_init(struct ra_ctx *ctx)
+          .window = vo_android_native_window(ctx->vo)
+     };
+ 
+-    struct ra_ctx_params params = {0};
++    struct ra_ctx_params params = {
++        .preferred_csp = preferred_csp,
++    };
+ 
+     VkInstance inst = vk->vkinst->instance;
+     VkResult res = vkCreateAndroidSurfaceKHR(inst, &info, NULL, &vk->surface);
