@@ -1,14 +1,14 @@
 diff --git a/video/out/opengl/context_android.c b/video/out/opengl/context_android.c
-index 0a12cf8..33eb774 100644
+index 0a12cf8..2a88f6c 100644
 --- a/video/out/opengl/context_android.c
 +++ b/video/out/opengl/context_android.c
-@@ -17,9 +17,13 @@
+@@ -17,12 +17,36 @@
  
  #include <EGL/egl.h>
  #include <EGL/eglext.h>
-+#include <android/api-level.h>
 +#include <android/data_space.h>
 +#include <android/native_window.h>
++#include <dlfcn.h>
  
  #include "video/out/android_common.h"
  #include "egl_helpers.h"
@@ -16,7 +16,30 @@ index 0a12cf8..33eb774 100644
  #include "common/common.h"
  #include "context.h"
  
-@@ -74,14 +78,56 @@ static bool android_init(struct ra_ctx *ctx)
++// ANativeWindow_setBuffersDataSpace was introduced in API 28. The NDK header
++// hard-annotates it as unavailable below that level, and this toolchain
++// enforces that at compile time regardless of __builtin_available guards, so
++// the symbol is resolved manually via dlsym instead of called directly. This
++// keeps a single binary loadable on pre-28 devices (where the lookup simply
++// returns NULL and the call below is skipped) while still using it on 28+.
++typedef int32_t (*ANativeWindow_setBuffersDataSpace_t)(ANativeWindow *, int32_t);
++
++static ANativeWindow_setBuffersDataSpace_t get_set_buffers_data_space(void)
++{
++    static ANativeWindow_setBuffersDataSpace_t fn;
++    static bool resolved;
++    if (!resolved) {
++        fn = (ANativeWindow_setBuffersDataSpace_t)
++            dlsym(RTLD_DEFAULT, "ANativeWindow_setBuffersDataSpace");
++        resolved = true;
++    }
++    return fn;
++}
++
+ struct priv {
+     struct GL gl;
+     EGLDisplay egl_display;
+@@ -74,14 +98,56 @@ static bool android_init(struct ra_ctx *ctx)
      eglGetConfigAttrib(p->egl_display, config, EGL_NATIVE_VISUAL_ID, &format);
      ANativeWindow_setBuffersGeometry(native_window, 0, 0, format);
  
@@ -58,16 +81,16 @@ index 0a12cf8..33eb774 100644
 +    // buffer as if it were sRGB. The setter is API 28+; older devices keep
 +    // the sRGB-tagged path above.
 +    if (has_p3_colorspace) {
-+        // Clang's availability check for an API-28 symbol needs the
-+        // __builtin_available guard specifically; a plain runtime
-+        // android_get_device_api_level() comparison still fails to compile.
-+        if (__builtin_available(android 28, *)) {
-+            int32_t ds_result = ANativeWindow_setBuffersDataSpace(native_window,
-+                                                                   ADATASPACE_DISPLAY_P3);
++        ANativeWindow_setBuffersDataSpace_t set_data_space = get_set_buffers_data_space();
++        if (set_data_space) {
++            int32_t ds_result = set_data_space(native_window, ADATASPACE_DISPLAY_P3);
 +            if (ds_result < 0) {
 +                MP_WARN(ctx, "Failed to tag ANativeWindow as Display-P3 (%d)\n",
 +                        (int)ds_result);
 +            }
++        } else {
++            MP_VERBOSE(ctx, "ANativeWindow_setBuffersDataSpace unavailable "
++                             "(pre-API-28 device), skipping Display-P3 tag\n");
 +        }
 +    }
 +
