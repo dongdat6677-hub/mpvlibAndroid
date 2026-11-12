@@ -192,6 +192,40 @@ jobs:
 
           cp "$AAR_PATH" "dist/mpvlib.aar"
 
+          # The release AAR embeds unstripped .so files for all 4 ABIs
+          # (~190MB), which is both unnecessary (only one ABI is ever used
+          # on a given device) and too large to hand-upload through the
+          # GitHub web UI (25MB drag-and-drop limit). Keep only arm64-v8a
+          # (the only ABI needed by this project's target devices) and
+          # strip debug symbols from what remains, before it's uploaded as
+          # an artifact.
+          echo "Original AAR size:"
+          du -h "dist/mpvlib.aar"
+
+          WORKDIR="$(mktemp -d)"
+          unzip -q "dist/mpvlib.aar" -d "$WORKDIR"
+
+          if [ -d "$WORKDIR/jni" ]; then
+            find "$WORKDIR/jni" -mindepth 1 -maxdepth 1 -type d \
+              ! -name "arm64-v8a" -exec rm -rf {} +
+          fi
+
+          NDK_ROOT="${ANDROID_NDK_LATEST_HOME:-${ANDROID_NDK_HOME:-$(ls -d /usr/local/lib/android/sdk/ndk/*/ 2>/dev/null | sort -V | tail -1)}}"
+          STRIP="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
+
+          if [ -x "$STRIP" ] && [ -d "$WORKDIR/jni/arm64-v8a" ]; then
+            find "$WORKDIR/jni/arm64-v8a" -name "*.so" -exec "$STRIP" --strip-unneeded {} +
+          else
+            echo "Warning: llvm-strip not found at $STRIP, shipping unstripped arm64-v8a libs" >&2
+          fi
+
+          rm -f "dist/mpvlib.aar"
+          (cd "$WORKDIR" && zip -q -r -X "$OLDPWD/dist/mpvlib.aar" .)
+          rm -rf "$WORKDIR"
+
+          echo "Trimmed AAR size:"
+          du -h "dist/mpvlib.aar"
+
       - name: Upload AAR artifact
         uses: actions/upload-artifact@v7
         with:
