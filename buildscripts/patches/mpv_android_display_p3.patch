@@ -1,5 +1,5 @@
 diff --git a/video/out/opengl/context_android.c b/video/out/opengl/context_android.c
-index 0a12cf8..cf0ef17 100644
+index 0a12cf8..33eb774 100644
 --- a/video/out/opengl/context_android.c
 +++ b/video/out/opengl/context_android.c
 @@ -17,9 +17,13 @@
@@ -16,7 +16,7 @@ index 0a12cf8..cf0ef17 100644
  #include "common/common.h"
  #include "context.h"
  
-@@ -74,14 +78,51 @@ static bool android_init(struct ra_ctx *ctx)
+@@ -74,14 +78,56 @@ static bool android_init(struct ra_ctx *ctx)
      eglGetConfigAttrib(p->egl_display, config, EGL_NATIVE_VISUAL_ID, &format);
      ANativeWindow_setBuffersGeometry(native_window, 0, 0, format);
  
@@ -57,12 +57,17 @@ index 0a12cf8..cf0ef17 100644
 +    // ANativeWindow's dataspace set explicitly or it composites the P3
 +    // buffer as if it were sRGB. The setter is API 28+; older devices keep
 +    // the sRGB-tagged path above.
-+    if (has_p3_colorspace && android_get_device_api_level() >= 28) {
-+        int32_t ds_result = ANativeWindow_setBuffersDataSpace(native_window,
-+                                                               ADATASPACE_DISPLAY_P3);
-+        if (ds_result < 0) {
-+            MP_WARN(ctx, "Failed to tag ANativeWindow as Display-P3 (%d)\n",
-+                    (int)ds_result);
++    if (has_p3_colorspace) {
++        // Clang's availability check for an API-28 symbol needs the
++        // __builtin_available guard specifically; a plain runtime
++        // android_get_device_api_level() comparison still fails to compile.
++        if (__builtin_available(android 28, *)) {
++            int32_t ds_result = ANativeWindow_setBuffersDataSpace(native_window,
++                                                                   ADATASPACE_DISPLAY_P3);
++            if (ds_result < 0) {
++                MP_WARN(ctx, "Failed to tag ANativeWindow as Display-P3 (%d)\n",
++                        (int)ds_result);
++            }
 +        }
 +    }
 +
