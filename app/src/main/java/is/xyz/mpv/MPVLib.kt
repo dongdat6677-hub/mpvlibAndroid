@@ -42,6 +42,20 @@ object MPVLib {
 
     external fun grabThumbnail(dimension: Int): Bitmap?
     external fun grabThumbnailFast(path: String, position: Double = 0.0, dimension: Int, useHwDec: Boolean = true): Bitmap?
+    /**
+ * Captures a compact RGB24 sample from the currently playing MPV video frame.
+ *
+ * Returned byte layout:
+ * - Bytes 0-1: image width (unsigned 16-bit, little-endian)
+ * - Bytes 2-3: image height (unsigned 16-bit, little-endian)
+ * - Remaining bytes: packed RGB24 pixels.
+ *
+ * The original aspect ratio is preserved.
+ * The longest image dimension is limited by maxDimension.
+ *
+ * Must be called while MPV is initialized and protected from concurrent destruction.
+ */
+    external fun grabFrameSample(maxDimension: Int): ByteArray?
     external fun setThumbnailJavaVM(appctx: Context)
     external fun clearThumbnailCache()
 
