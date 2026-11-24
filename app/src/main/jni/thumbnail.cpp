@@ -158,6 +158,273 @@ jni_func(jobject, grabThumbnail, jint dimension) {
     return bitmap;
 }
 
+jni_func(jbyteArray, grabFrameSample, jint maxDimension) {
+    // Accept only compact sampling dimensions.
+    if (maxDimension < 16 || maxDimension > 256) {
+        ALOGE("FrameSample | Invalid maxDimension: %d", maxDimension);
+        return NULL;
+    }
+
+    // Serialize access to g_mpv with destroyNative().
+    std::lock_guard<std::mutex> lock(g_mpv_mutex);
+
+    if (!g_mpv) {
+        ALOGE("FrameSample | MPV is not initialized");
+        return NULL;
+    }
+
+    mpv_node result{};
+
+    mpv_node command{}, command_args[2];
+    mpv_node_list command_array{};
+
+    command_args[0] = make_node_str("screenshot-raw");
+    command_args[1] = make_node_str("video");
+
+    command_array.num = 2;
+    command_array.values = command_args;
+
+    command.format = MPV_FORMAT_NODE_ARRAY;
+    command.u.list = &command_array;
+
+    if (mpv_command_node(g_mpv, &command, &result) < 0) {
+        ALOGE("FrameSample | screenshot-raw failed");
+        mpv_free_node_contents(&result);
+        return NULL;
+    }
+
+    int64_t frame_width = 0;
+    int64_t frame_height = 0;
+    int64_t frame_stride = 0;
+
+    bool width_found = false;
+    bool height_found = false;
+    bool stride_found = false;
+    bool format_ok = false;
+
+    mpv_byte_array *frame_data = NULL;
+
+    // Parse the returned MPV node map.
+    if (result.format == MPV_FORMAT_NODE_MAP && result.u.list) {
+        for (int i = 0; i < result.u.list->num; ++i) {
+            const char *key = result.u.list->keys[i];
+            const mpv_node *value = &result.u.list->values[i];
+
+            if (!key)
+                continue;
+
+            if (!strcmp(key, "w") &&
+                value->format == MPV_FORMAT_INT64) {
+                frame_width = value->u.int64;
+                width_found = true;
+            } else if (!strcmp(key, "h") &&
+                       value->format == MPV_FORMAT_INT64) {
+                frame_height = value->u.int64;
+                height_found = true;
+            } else if (!strcmp(key, "stride") &&
+                       value->format == MPV_FORMAT_INT64) {
+                frame_stride = value->u.int64;
+                stride_found = true;
+            } else if (!strcmp(key, "format") &&
+                       value->format == MPV_FORMAT_STRING &&
+                       value->u.string) {
+                format_ok = !strcmp(value->u.string, "bgr0");
+            } else if (!strcmp(key, "data") &&
+                       value->format == MPV_FORMAT_BYTE_ARRAY) {
+                frame_data = value->u.ba;
+            }
+        }
+    }
+
+    // Validate frame metadata before accessing its pixel buffer.
+    if (!width_found || !height_found || !stride_found ||
+        !format_ok || !frame_data || !frame_data->data ||
+        frame_width <= 0 || frame_height <= 0 ||
+        frame_width > 16384 || frame_height > 16384 ||
+        frame_stride <= 0 ||
+        frame_stride > std::numeric_limits<int>::max() ||
+        frame_width > std::numeric_limits<int>::max() ||
+        frame_height > std::numeric_limits<int>::max()) {
+        ALOGE("FrameSample | Invalid frame metadata");
+        mpv_free_node_contents(&result);
+        return NULL;
+    }
+
+    const int width = static_cast<int>(frame_width);
+    const int height = static_cast<int>(frame_height);
+    const int stride = static_cast<int>(frame_stride);
+
+    // BGR0 requires at least four bytes per pixel.
+    if (static_cast<int64_t>(stride) <
+        static_cast<int64_t>(width) * 4) {
+        ALOGE("FrameSample | Invalid source stride");
+        mpv_free_node_contents(&result);
+        return NULL;
+    }
+
+    // Check source buffer size without overflowing size_t.
+    const size_t source_stride = static_cast<size_t>(stride);
+    const size_t source_height = static_cast<size_t>(height);
+
+    if (source_height >
+        std::numeric_limits<size_t>::max() / source_stride) {
+        ALOGE("FrameSample | Source buffer size overflow");
+        mpv_free_node_contents(&result);
+        return NULL;
+    }
+
+    const size_t required_source_size = source_stride * source_height;
+
+    if (frame_data->size < required_source_size) {
+        ALOGE("FrameSample | Source buffer is too small");
+        mpv_free_node_contents(&result);
+        return NULL;
+    }
+
+    // Preserve the original aspect ratio.
+    const int longest_dimension = (width > height) ? width : height;
+
+    const double scale = std::min(
+        1.0,
+        static_cast<double>(maxDimension) /
+            static_cast<double>(longest_dimension)
+    );
+
+    const int output_width = std::max(
+        1, static_cast<int>(std::lround(width * scale))
+    );
+
+    const int output_height = std::max(
+        1, static_cast<int>(std::lround(height * scale))
+    );
+
+    const size_t output_w = static_cast<size_t>(output_width);
+    const size_t output_h = static_cast<size_t>(output_height);
+
+    // RGB24 uses three bytes per pixel.
+    if (output_w > std::numeric_limits<size_t>::max() / 3) {
+        ALOGE("FrameSample | Output row size overflow");
+        mpv_free_node_contents(&result);
+        return NULL;
+    }
+
+    const size_t output_stride = output_w * 3;
+
+    if (output_h >
+        (std::numeric_limits<size_t>::max() - 4) / output_stride) {
+        ALOGE("FrameSample | Output buffer size overflow");
+        mpv_free_node_contents(&result);
+        return NULL;
+    }
+
+    const size_t pixel_size = output_stride * output_h;
+    const size_t total_size = 4 + pixel_size;
+
+    if (total_size > static_cast<size_t>(
+            std::numeric_limits<jsize>::max())) {
+        ALOGE("FrameSample | Output exceeds JNI array limit");
+        mpv_free_node_contents(&result);
+        return NULL;
+    }
+
+    SwsContext *scaler = sws_getContext(
+        width,
+        height,
+        AV_PIX_FMT_BGR0,
+        output_width,
+        output_height,
+        AV_PIX_FMT_RGB24,
+        SWS_BILINEAR,
+        NULL,
+        NULL,
+        NULL
+    );
+
+    if (!scaler) {
+        ALOGE("FrameSample | Failed to create RGB24 scaler");
+        mpv_free_node_contents(&result);
+        return NULL;
+    }
+
+    std::vector<uint8_t> output;
+
+    try {
+        output.resize(total_size);
+    } catch (...) {
+        ALOGE("FrameSample | Output allocation failed");
+        sws_freeContext(scaler);
+        mpv_free_node_contents(&result);
+        return NULL;
+    }
+
+    // Header: width and height, unsigned 16-bit little-endian.
+    output[0] = static_cast<uint8_t>(output_width & 0xFF);
+    output[1] = static_cast<uint8_t>((output_width >> 8) & 0xFF);
+    output[2] = static_cast<uint8_t>(output_height & 0xFF);
+    output[3] = static_cast<uint8_t>((output_height >> 8) & 0xFF);
+
+    const uint8_t *source_data =
+        static_cast<const uint8_t *>(frame_data->data);
+
+    const uint8_t *source_planes[4] = {
+        source_data, NULL, NULL, NULL
+    };
+
+    int source_linesize[4] = {
+        stride, 0, 0, 0
+    };
+
+    uint8_t *destination_planes[4] = {
+        output.data() + 4, NULL, NULL, NULL
+    };
+
+    int destination_linesize[4] = {
+        static_cast<int>(output_stride), 0, 0, 0
+    };
+
+    const int scaled_height = sws_scale(
+        scaler,
+        source_planes,
+        source_linesize,
+        0,
+        height,
+        destination_planes,
+        destination_linesize
+    );
+
+    sws_freeContext(scaler);
+    mpv_free_node_contents(&result);
+
+    if (scaled_height != output_height) {
+        ALOGE("FrameSample | Incomplete frame conversion");
+        return NULL;
+    }
+
+    jbyteArray java_result = env->NewByteArray(
+        static_cast<jsize>(total_size)
+    );
+
+    if (!java_result) {
+        ALOGE("FrameSample | JNI byte array allocation failed");
+        return NULL;
+    }
+
+    env->SetByteArrayRegion(
+        java_result,
+        0,
+        static_cast<jsize>(total_size),
+        reinterpret_cast<const jbyte *>(output.data())
+    );
+
+    if (env->ExceptionCheck()) {
+        ALOGE("FrameSample | JNI array copy failed");
+        env->DeleteLocalRef(java_result);
+        return NULL;
+    }
+
+    return java_result;
+ }
+
 // ============================================================================
 // FAST THUMBNAIL GENERATION USING DIRECT FFMPEG API
 // Bypasses MPV entirely, uses FFmpeg API directly
