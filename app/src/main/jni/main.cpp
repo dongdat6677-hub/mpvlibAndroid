@@ -33,6 +33,7 @@ extern "C" {
 JavaVM *g_vm;
 mpv_handle *g_mpv;
 std::atomic<bool> g_event_thread_request_exit(false);
+std::mutex g_mpv_mutex;
 
 static pthread_t event_thread_id;
 static jobject global_appctx;
@@ -85,6 +86,14 @@ jni_func(void, init) {
 }
 
 jni_func(void, destroyNative) {
+    jni_func(void, destroyNative) {
+    std::lock_guard<std::mutex> lock(g_mpv_mutex);
+
+    if (!g_mpv) {
+        ALOGV("mpv destroy called but it's already destroyed");
+        return;
+    }
+        
     if (!g_mpv) {
         ALOGV("mpv destroy called but it's already destroyed");
         return;
