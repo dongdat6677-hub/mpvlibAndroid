@@ -5,6 +5,9 @@
 #include <chrono>
 #include <unordered_map>
 #include <cmath>
+#include <cstring>
+#include <limits>
+#include <vector>
 
 #include <jni.h>
 #include <android/bitmap.h>
@@ -29,6 +32,7 @@ extern "C" {
 
 extern "C" {
     jni_func(jobject, grabThumbnail, jint dimension);
+    jni_func(jbyteArray, grabFrameSample, jint maxDimension);
     jni_func(jobject, grabThumbnailFast, jstring jpath, jdouble position, jint dimension, jboolean use_hw_dec);
     jni_func(void, setThumbnailJavaVM, jobject appctx);
     jni_func(void, clearThumbnailCache);
