@@ -4,6 +4,7 @@
 #include <time.h>
 #include <locale.h>
 #include <atomic>
+#include <mutex>
 
 #include <mpv/client.h>
 
@@ -86,14 +87,8 @@ jni_func(void, init) {
 }
 
 jni_func(void, destroyNative) {
-    jni_func(void, destroyNative) {
     std::lock_guard<std::mutex> lock(g_mpv_mutex);
 
-    if (!g_mpv) {
-        ALOGV("mpv destroy called but it's already destroyed");
-        return;
-    }
-        
     if (!g_mpv) {
         ALOGV("mpv destroy called but it's already destroyed");
         return;
