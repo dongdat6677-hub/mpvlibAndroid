@@ -5,6 +5,7 @@
 #include <chrono>
 #include <unordered_map>
 #include <cmath>
+#include <algorithm>
 #include <cstring>
 #include <limits>
 #include <vector>
