@@ -347,16 +347,14 @@ jni_func(jbyteArray, grabFrameSample, jint maxDimension) {
         return NULL;
     }
 
-    std::vector<uint8_t> output;
+uint8_t *output = static_cast<uint8_t *>(malloc(total_size));
 
-    try {
-        output.resize(total_size);
-    } catch (...) {
-        ALOGE("FrameSample | Output allocation failed");
-        sws_freeContext(scaler);
-        mpv_free_node_contents(&result);
-        return NULL;
-    }
+if (!output) {
+    ALOGE("FrameSample | Output allocation failed");
+    sws_freeContext(scaler);
+    mpv_free_node_contents(&result);
+    return NULL;
+}
 
     // Header: width and height, unsigned 16-bit little-endian.
     output[0] = static_cast<uint8_t>(output_width & 0xFF);
@@ -376,7 +374,7 @@ jni_func(jbyteArray, grabFrameSample, jint maxDimension) {
     };
 
     uint8_t *destination_planes[4] = {
-        output.data() + 4, NULL, NULL, NULL
+        output + 4, NULL, NULL, NULL
     };
 
     int destination_linesize[4] = {
@@ -398,6 +396,7 @@ jni_func(jbyteArray, grabFrameSample, jint maxDimension) {
 
     if (scaled_height != output_height) {
         ALOGE("FrameSample | Incomplete frame conversion");
+        free(output);
         return NULL;
     }
 
@@ -407,6 +406,7 @@ jni_func(jbyteArray, grabFrameSample, jint maxDimension) {
 
     if (!java_result) {
         ALOGE("FrameSample | JNI byte array allocation failed");
+        free(output);
         return NULL;
     }
 
@@ -414,15 +414,17 @@ jni_func(jbyteArray, grabFrameSample, jint maxDimension) {
         java_result,
         0,
         static_cast<jsize>(total_size),
-        reinterpret_cast<const jbyte *>(output.data())
+        reinterpret_cast<const jbyte *>(output)
     );
 
     if (env->ExceptionCheck()) {
         ALOGE("FrameSample | JNI array copy failed");
         env->DeleteLocalRef(java_result);
+        free(output);
         return NULL;
     }
 
+    free(output);
     return java_result;
  }
 
