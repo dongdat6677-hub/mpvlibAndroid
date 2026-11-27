@@ -51,6 +51,9 @@ static inline mpv_node make_node_str(const char *s)
     r.u.string = const_cast<char*>(s);
     return r;
 }
+// Reuse the frame-sampling scaler across consecutive samples.
+// Access is serialized by g_mpv_mutex inside grabFrameSample().
+static SwsContext *frame_sample_scaler = nullptr;
 
 jni_func(jobject, grabThumbnail, jint dimension) {
     auto total_start = std::chrono::high_resolution_clock::now();
