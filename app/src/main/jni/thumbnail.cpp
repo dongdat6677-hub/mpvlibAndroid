@@ -355,7 +355,6 @@ uint8_t *output = static_cast<uint8_t *>(malloc(total_size));
 
 if (!output) {
     ALOGE("FrameSample | Output allocation failed");
-    sws_freeContext(scaler);
     mpv_free_node_contents(&result);
     return NULL;
 }
