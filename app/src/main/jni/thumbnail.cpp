@@ -331,24 +331,25 @@ jni_func(jbyteArray, grabFrameSample, jint maxDimension) {
         return NULL;
     }
 
-    SwsContext *scaler = sws_getContext(
-        width,
-        height,
-        AV_PIX_FMT_BGR0,
-        output_width,
-        output_height,
-        AV_PIX_FMT_RGB24,
-        SWS_BILINEAR,
-        NULL,
-        NULL,
-        NULL
-    );
+    frame_sample_scaler = sws_getCachedContext(
+    frame_sample_scaler,
+    width,
+    height,
+    AV_PIX_FMT_BGR0,
+    output_width,
+    output_height,
+    AV_PIX_FMT_RGB24,
+    SWS_BILINEAR,
+    NULL,
+    NULL,
+    NULL
+);
 
-    if (!scaler) {
-        ALOGE("FrameSample | Failed to create RGB24 scaler");
-        mpv_free_node_contents(&result);
-        return NULL;
-    }
+if (!frame_sample_scaler) {
+    ALOGE("FrameSample | Failed to create or update RGB24 scaler");
+    mpv_free_node_contents(&result);
+    return NULL;
+}
 
 uint8_t *output = static_cast<uint8_t *>(malloc(total_size));
 
@@ -385,16 +386,15 @@ if (!output) {
     };
 
     const int scaled_height = sws_scale(
-        scaler,
-        source_planes,
-        source_linesize,
-        0,
-        height,
-        destination_planes,
-        destination_linesize
+       frame_sample_scaler,
+       source_planes,
+       source_linesize,
+       0,
+       height,
+       destination_planes,
+       destination_linesize
     );
 
-    sws_freeContext(scaler);
     mpv_free_node_contents(&result);
 
     if (scaled_height != output_height) {
