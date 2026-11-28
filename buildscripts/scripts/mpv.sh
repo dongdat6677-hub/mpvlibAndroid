@@ -1,3 +1,4 @@
+
 #!/bin/bash -e
 
 . ../../include/path.sh
@@ -5,22 +6,38 @@
 build=_build$ndk_suffix
 
 if [ "$1" == "build" ]; then
-	true
+        true
 elif [ "$1" == "clean" ]; then
-	rm -rf $build
-	exit 0
+        rm -rf $build
+        exit 0
 else
-	exit 255
+        exit 255
 fi
 
 if ! git apply --reverse --check ../../patches/mpv_video_shaders.patch 2>/dev/null; then
-	git apply ../../patches/mpv_video_shaders.patch
+        git apply ../../patches/mpv_video_shaders.patch
 fi
 
 if ! git apply --reverse --check ../../patches/mpv_android_fdsan_fork.patch 2>/dev/null; then
-	git apply ../../patches/mpv_android_fdsan_fork.patch
+        git apply ../../patches/mpv_android_fdsan_fork.patch
 fi
- 
+
+if ! git apply --reverse --check ../../patches/mpv_android_font_cache.patch 2>/dev/null; then
+        git apply ../../patches/mpv_android_font_cache.patch
+fi
+
+if ! git apply --reverse --check ../../patches/mpv_android_video_rect.patch 2>/dev/null; then
+        git apply ../../patches/mpv_android_video_rect.patch
+fi
+
+if ! git apply --reverse --check ../../patches/mpv_android_pause_passthrough.patch 2>/dev/null; then
+        git apply ../../patches/mpv_android_pause_passthrough.patch
+fi
+
+if ! git apply --reverse --check ../../patches/mpv_sub_back_radius.patch 2>/dev/null; then
+        git apply ../../patches/mpv_sub_back_radius.patch
+fi
+
 # Android provides Vulkan, but no pkgconfig file.
 mkdir -p "$prefix_dir"/lib/pkgconfig
 cat >"$prefix_dir"/lib/pkgconfig/vulkan.pc <<END
@@ -32,25 +49,25 @@ Cflags:
 END
 
 check_iconv_files () {
-	for file in "$prefix_dir/include/iconv.h" "$prefix_dir/lib/libiconv.a" "$prefix_dir/lib/libcharset.a"; do
-		if [ ! -f "$file" ]; then
-			echo "Missing libiconv file: $file" >&2
-			exit 1
-		fi
-	done
+        for file in "$prefix_dir/include/iconv.h" "$prefix_dir/lib/libiconv.a" "$prefix_dir/lib/libcharset.a"; do
+                if [ ! -f "$file" ]; then
+                        echo "Missing libiconv file: $file" >&2
+                        exit 1
+                fi
+        done
 }
 
 patch_mpv_iconv_dependency () {
-	local iconv_dep
+        local iconv_dep
 
-	# Meson's built-in iconv dependency does not consult iconv.pc, and find_library()
-	# has no extra search dirs here. Provide the just-built static libiconv directly.
-	iconv_dep="iconv = declare_dependency(compile_args: ['-I$prefix_dir/include'], link_args: ['$prefix_dir/lib/libiconv.a', '$prefix_dir/lib/libcharset.a'])"
-	${SED:-sed} -i.bak \
-		-e "/^iconv = dependency('iconv', required: get_option('iconv'))$/c\\$iconv_dep" \
-		-e "/^iconv = declare_dependency(compile_args: \['-I.*\/include'\], link_args: \['.*\/libiconv\.a', '.*\/libcharset\.a'\])$/c\\$iconv_dep" \
-		meson.build
-	rm -f meson.build.bak
+        # Meson's built-in iconv dependency does not consult iconv.pc, and find_library()
+        # has no extra search dirs here. Provide the just-built static libiconv directly.
+        iconv_dep="iconv = declare_dependency(compile_args: ['-I$prefix_dir/include'], link_args: ['$prefix_dir/lib/libiconv.a', '$prefix_dir/lib/libcharset.a'])"
+        ${SED:-sed} -i.bak \
+                -e "/^iconv = dependency('iconv', required: get_option('iconv'))$/c\\$iconv_dep" \
+                -e "/^iconv = declare_dependency(compile_args: \['-I.*\/include'\], link_args: \['.*\/libiconv\.a', '.*\/libcharset\.a'\])$/c\\$iconv_dep" \
+                meson.build
+        rm -f meson.build.bak
 }
 
 unset CC CXX # meson wants these unset
@@ -62,19 +79,19 @@ check_iconv_files
 echo "Checking MuJS before building mpv..."
 
 if [ ! -f "$prefix_dir/lib/libmujs.a" ]; then
-	echo "Error: libmujs.a not found at $prefix_dir/lib/libmujs.a" >&2
-	echo "Build mujs first: ./buildall.sh --arch $prefix_name mujs" >&2
-	exit 1
+        echo "Error: libmujs.a not found at $prefix_dir/lib/libmujs.a" >&2
+        echo "Build mujs first: ./buildall.sh --arch $prefix_name mujs" >&2
+        exit 1
 fi
 
 if [ ! -f "$prefix_dir/include/mujs.h" ]; then
-	echo "Error: mujs.h not found at $prefix_dir/include/mujs.h" >&2
-	exit 1
+        echo "Error: mujs.h not found at $prefix_dir/include/mujs.h" >&2
+        exit 1
 fi
 
 if [ ! -f "$prefix_dir/lib/pkgconfig/mujs.pc" ]; then
-	echo "Error: mujs.pc not found at $prefix_dir/lib/pkgconfig/mujs.pc" >&2
-	exit 1
+        echo "Error: mujs.pc not found at $prefix_dir/lib/pkgconfig/mujs.pc" >&2
+        exit 1
 fi
 
 echo "pkg-config check for mujs:"
@@ -84,37 +101,37 @@ pkg-config --cflags mujs
 patch_mpv_iconv_dependency
 
 meson setup $build --cross-file "$prefix_dir"/crossfile.txt \
-	--default-library shared \
-	-D{iconv,uchardet}=enabled \
-	-D{libarchive,dvdnav}=enabled \
-	-Dlua=luajit \
-	-D{libcurl,rubberband}=enabled \
-	-Djavascript=enabled \
-	-Dlibmpv=true -Dcplayer=false \
-	-Dlibbluray=enabled \
-	-Dvulkan=enabled \
-	-Dmanpage-build=disabled
+        --default-library shared \
+        -D{iconv,uchardet}=enabled \
+        -D{libarchive,dvdnav}=enabled \
+        -Dlua=luajit \
+        -D{libcurl,rubberband}=enabled \
+        -Djavascript=enabled \
+        -Dlibmpv=true -Dcplayer=false \
+        -Dlibbluray=enabled \
+        -Dvulkan=enabled \
+        -Dmanpage-build=disabled
 
 if ! grep -Eq '^#define HAVE_CLONE 0$' "$build/config.h"; then
-	echo "Android libmpv configured with unsafe HAVE_CLONE; refusing to build." >&2
-	exit 1
+        echo "Android libmpv configured with unsafe HAVE_CLONE; refusing to build." >&2
+        exit 1
 fi
 
 ninja -C $build -j$cores
 
 if readelf --wide --dyn-syms "$build/libmpv.so" | grep -Eq '[[:space:]]clone@LIBC([[:space:]]|$)'; then
-	echo "Android libmpv still imports clone@LIBC; refusing to package it." >&2
-	exit 1
+        echo "Android libmpv still imports clone@LIBC; refusing to package it." >&2
+        exit 1
 fi
 if ! readelf --wide --dyn-syms "$build/libmpv.so" | grep -Eq '[[:space:]]fork@LIBC([[:space:]]|$)'; then
-	echo "Android libmpv does not import fork@LIBC; subprocess fallback is missing." >&2
-	exit 1
+        echo "Android libmpv does not import fork@LIBC; subprocess fallback is missing." >&2
+        exit 1
 fi
 
 if [ -f $build/libmpv.a ]; then
-	echo >&2 "Meson produced static libmpv.a instead of shared libmpv.so, forcing rebuild."
-	$0 clean
-	exec $0 build
+        echo >&2 "Meson produced static libmpv.a instead of shared libmpv.so, forcing rebuild."
+        $0 clean
+        exec $0 build
 fi
 
 DESTDIR="$prefix_dir" ninja -C $build install
