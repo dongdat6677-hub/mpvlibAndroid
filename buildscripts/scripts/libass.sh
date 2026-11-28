@@ -11,6 +11,14 @@ else
 	exit 255
 fi
 
+if ! git apply --reverse --check ../../patches/libass-background-radius.patch 2>/dev/null; then
+	git apply ../../patches/libass-background-radius.patch
+fi
+
+if ! git apply --reverse --check ../../patches/libass-hangul-jamo.patch 2>/dev/null; then
+	git apply ../../patches/libass-hangul-jamo.patch
+fi
+
 [ -f configure ] || ./autogen.sh
 
 asm_args=--enable-asm
@@ -22,7 +30,7 @@ cd _build$ndk_suffix
 ../configure \
 	--host=$ndk_triple --with-pic $asm_args \
 	--enable-static --disable-shared \
-	--enable-libunibreak --disable-require-system-font-provider
+	--enable-libunibreak --enable-fontconfig --disable-require-system-font-provider
 
 make -j$cores
 make DESTDIR="$prefix_dir" install
